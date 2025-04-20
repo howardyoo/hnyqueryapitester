@@ -6,6 +6,7 @@ Honeycomb Query API Tester for quick and easy testing of Honeycomb's query API
 ## How to run
 
 ```
+npm install
 npm run start
 ```
 
