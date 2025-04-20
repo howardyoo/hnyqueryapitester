@@ -1,0 +1,405 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Honeycomb Query API</title>
+  <style type="text/css">
+    th {
+      padding: 5px;
+      background-color: #f0f0f0;
+    }
+    td {
+      padding: 5px;
+    }
+  </style>
+  <link href="https://cdn.jsdelivr.net/npm/jsoneditor@latest/dist/jsoneditor.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jsoneditor@latest/dist/jsoneditor.min.js"></script>
+</head>
+<body style="font-family: Arial, Helvetica, sans-serif;">
+  <h1>Honeycomb Query API Tester</h1>
+
+  <script type="text/javascript">
+    var jsonEditor = null;
+    function init() {
+      const jsonTreeDiv = document.getElementById('json_tree');
+      jsonTreeDiv.innerHTML = '';
+      const options = { mode: "tree", name: "Honeycomb Query Result" };
+      jsonEditor = new JSONEditor(jsonTreeDiv, options);
+    }
+
+    function sayHello() {
+      fetch('/api/hello')
+        .then(res => res.text())
+        .then(text => {
+          document.getElementById('response').innerText = text;
+        });
+    }
+
+    function changeView() {
+      const view = document.getElementById('view_select').value;
+      if (view === 'table') {
+        document.getElementById('results').style.display = 'block'; 
+        document.getElementById('json_results').style.display = 'none';
+        document.getElementById('json_tree').style.display = 'none';
+        document.getElementById('csv_results').style.display = 'none';
+      } else if (view === 'json') {
+        document.getElementById('results').style.display = 'none';
+        document.getElementById('json_results').style.display = 'block';
+        document.getElementById('json_tree').style.display = 'none';
+        document.getElementById('csv_results').style.display = 'none';
+      } else if (view === 'json_tree') {
+        document.getElementById('results').style.display = 'none';
+        document.getElementById('json_results').style.display = 'none';
+        document.getElementById('json_tree').style.display = 'block';
+        document.getElementById('csv_results').style.display = 'none';
+      } else if (view === 'csv') {
+        document.getElementById('results').style.display = 'none';
+        document.getElementById('json_results').style.display = 'none';
+        document.getElementById('json_tree').style.display = 'none';
+        document.getElementById('csv_results').style.display = 'block';
+      }
+    }
+
+    function submitQuery() {
+      const apiendpoint = document.getElementById('apiendpoint').value;
+      const dataset = document.getElementById('dataset').value;
+      const apikey = document.getElementById('apikey').value;
+      const query = document.getElementById('query').value;
+      const series = document.getElementById('series').checked;
+      const total = document.getElementById('total').checked;
+      const other = document.getElementById('other').checked;
+      const limit = document.getElementById('limit').value;
+      console.log("apiendpoint", apiendpoint);
+      console.log("dataset", dataset);
+      console.log("query", query);
+      console.log("series", series);
+      console.log("total", total);
+      console.log("other", other);
+      console.log("limit", limit);
+
+      if(dataset == "") {
+        alert("Please enter a dataset");
+        return;
+      }
+
+      if(apikey == "") {
+        alert("Please enter an API key");
+        return;
+      }
+
+      if(apiendpoint == "") {
+        alert("Please enter an API endpoint");
+        return;
+      }
+
+      if(query.trim() == "") {
+        alert("Please enter a query");
+        return;
+      }
+
+      fetch('/api/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-honeycomb-team': apikey
+        },
+        body: JSON.stringify({apiendpoint: apiendpoint, datasetslug: dataset, query: query})
+      }).then(res => res.json())
+      .then(data => {
+        console.log("data", data);
+        if (data.status != 400) {
+            // call the get query result
+            var queryResultId = data.id;
+            fetch(`/api/query/${dataset}/${queryResultId}?&apiendpoint=${apiendpoint}&series=${series}&total=${total}&other=${other}&limit=${limit}`, {
+            method: 'GET',
+            headers: {
+                'x-honeycomb-team': apikey
+            }
+            }).then(res => res.json())
+            .then(data => {
+            console.log(data);
+            if (data) {
+                // populate the json results
+                const jsonResultsDiv = document.getElementById('json_results');
+                jsonResultsDiv.innerHTML = '';
+                const pre = document.createElement('pre');
+                pre.innerText = JSON.stringify(data, null, 2);
+                jsonResultsDiv.appendChild(pre);              
+                // populate the json tree in json editor
+                jsonEditor.set(data);
+            }
+
+            var breakdowns = data.query.breakdowns;
+            var calculations = data.query.calculations;
+
+            if(data.data.series) {
+              const csvResultsDiv = document.getElementById('csv_results');
+              csvResultsDiv.innerHTML = '';
+              const textarea = document.createElement('textarea');
+              textarea.style.width = '100%';
+              textarea.style.height = '500px';
+              var row = 0;
+              data.data.series.forEach(series => {
+                row++;
+                if(row == 1) {
+                  // header
+                  var header = "time";
+                  breakdowns.forEach(breakdown => {
+                    header += "," + breakdown;
+                  });
+                  calculations.forEach(calculation => {
+                      var key = calculation.op;
+                      if (calculation.column) {
+                          key = key + "(" + calculation.column + ")";
+                      }
+                      header += "," + key;
+                  });
+                  header += "\n";
+                  textarea.value = header;
+                } else {
+                  var line = series.time;
+                  breakdowns.forEach(breakdown => {
+                    line += "," + series.data[breakdown];
+                  });
+                  calculations.forEach(calculation => {
+                    var key = calculation.op;
+                    if (calculation.column) {
+                        key = key + "(" + calculation.column + ")";
+                    }
+                    line += "," + series.data[key];
+                  });
+                  line += "\n";
+                  textarea.value += line;
+                }
+              });
+              csvResultsDiv.appendChild(textarea);
+            }
+            
+            if (data.data.results) {
+
+                // populate the results in table format
+                const resultsDiv = document.getElementById('results');
+                resultsDiv.innerHTML = '';
+                var links = document.createElement('div');
+                var linkHtml = '<ul>';
+                // get two links from the data
+                linkHtml += '<li><a href="' + data.links.query_url + '" target="_blank">Query URL</a></li>';
+                linkHtml += '<li><a href="' + data.links.graph_image_url + '" target="_blank">Graph Image URL</a></li>';
+                linkHtml += '</ul>';
+
+                links.innerHTML = linkHtml;
+                resultsDiv.appendChild(links);
+
+                var table = document.createElement('table');
+                var rows = 0;    // counts the number of rows
+
+                // try to create header row first
+                var headerRow = document.createElement('tr');
+                breakdowns.forEach(breakdown => {
+                    var th = document.createElement('th');
+                    th.textContent = breakdown;
+                    headerRow.appendChild(th);
+                });
+                calculations.forEach(calculation => {
+                    var th = document.createElement('th');
+                    var key = calculation.op;
+                    if (calculation.column) {
+                        key = key + "(" + calculation.column + ")";
+                    }
+                    th.textContent = key;
+                    headerRow.appendChild(th);
+                });
+                table.appendChild(headerRow);
+
+                data.data.results.forEach(result => {
+                    rows++;
+                    const tr = document.createElement('tr');
+                    breakdowns.forEach(breakdown => {
+                        var td = document.createElement('td');
+                        td.textContent = result.data[breakdown];
+                        tr.appendChild(td);
+                    });
+                    calculations.forEach(calculation => {
+                        var td = document.createElement('td');
+                        var key = calculation.op;
+                        if (calculation.column) {
+                            key = key + "(" + calculation.column + ")";
+                        }
+                        td.textContent = result.data[key];
+                        tr.appendChild(td);
+                    });
+                    table.appendChild(tr);
+                });
+                resultsDiv.appendChild(table);
+            }
+            });
+        } else {
+            console.log("error", data);
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            var error = document.createElement('div');
+            error.innerHTML = '<p>Status: ' + data.status + '</p><p>type: ' + data.type + '</p><p>title: ' + data.title + '</p><p>detail: ' + data.detail + '</p><p>error: ' + data.error + '</p>';
+            resultsDiv.appendChild(error);
+        }
+      });
+    }
+
+    function countByName() {
+        const query = `
+    {
+        "calculations": [
+          {
+            "op": "COUNT"
+          }
+        ],
+        "orders": [
+          {
+            "op": "COUNT",
+            "order": "descending"
+          }
+        ],
+        "breakdowns": [
+           "service.name",
+           "name"
+        ],
+        "limit": 1000,
+        "time_range": 7200
+    } `;
+        document.getElementById('query').value = query;
+    }
+
+    function p95ByName() {
+        const query = `
+    {
+        "calculations": [
+          {
+            "op": "P95",
+            "column": "duration_ms"
+          }
+        ],
+        "orders": [
+          {
+            "op": "P95",
+            "column": "duration_ms",
+            "order": "descending"
+          }
+        ],
+        "breakdowns": [
+           "service.name",
+           "name"
+        ],
+        "limit": 1000,
+        "time_range": 7200
+    } `;
+        document.getElementById('query').value = query;
+    }
+
+    function errorByUserId() {
+        const query = `
+    {
+        "calculations": [
+          {
+            "op": "COUNT"
+          }
+        ],
+        "orders": [
+          {
+            "op": "COUNT",
+            "order": "descending"
+          }
+        ],
+        "filters": [
+          {
+            "op": "=",
+            "column": "error",
+            "value": "true"
+          },
+          {
+            "op": "exists",
+            "column": "app.user_id"
+          },
+          {
+            "op": "does-not-exist",
+            "column": "trace.parent_id"
+          }
+        ],
+        "filter_combination": "AND",
+        "breakdowns": [
+           "service.name",
+           "name",
+           "app.user_id",
+           "error"
+        ],
+        "limit": 1000,
+        "time_range": 7200
+    } `;
+        document.getElementById('query').value = query;
+    }
+    // run init when the dom is loaded.
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+
+  <!-- want to display the image and the form side by side -->
+  <div style="display: flex; flex-direction: row; gap: 10px;">
+    <div>
+        <img src="./images/honeycomb-api.png" alt="Honeycomb API" style="width: 450px;"/>
+    </div>
+    <div style="width: 100%;">
+    <form id="queryForm">
+        <div>
+        API endpoint: <input type="text" id="apiendpoint" placeholder="API endpoint" value="https://api.honeycomb.io"/>
+        Dataset: <input type="text" id="dataset" placeholder="Dataset" value=""/>
+        API key: <input type="password" id="apikey" placeholder="API key" value="" />
+        <br/>
+        Limit (Optional): <input type="text" id="limit" placeholder="Limit" value="10000"/>
+        Series: <input type="checkbox" id="series" checked/>
+        Total: <input type="checkbox" id="total" />
+        Other: <input type="checkbox" id="other" />
+        </div>
+        <div>Query:</div>
+        <input type="button" id="count_by_name" value="Count by name" onclick="countByName()"/>
+        <input type="button" id="p95_by_name" value="P95 by name" onclick="p95ByName()"/>
+        <input type="button" id="error_by_user_id" value="Error by user id" onclick="errorByUserId()"/>
+        <div>
+        <textarea id="query" style="width: 80%; height: 300px; border-radius: 10px; margin: 10px;">
+    {
+        "calculations": [
+        {
+            "op": "COUNT"
+        }
+        ],
+        "orders": [
+        {
+            "op": "COUNT",
+            "order": "descending"
+        }
+        ],
+        "breakdowns": [
+           "service.name",
+           "name"
+        ],
+        "time_range": 7200
+    } 
+        </textarea>
+        </div>
+        <button type="button" onclick="submitQuery()">Submit</button>
+    </form>
+    </div>
+  </div>
+  <hr />
+  <h2>Query Results</h2>
+  View AS: <select id="view_select" onchange="changeView()">
+    <option value="table" selected>Table (results)</option>
+    <option value="json_tree">JSON Tree</option>
+    <option value="json">RAW JSON</option>
+    <option value="csv">CSV (series)</option>
+  </select>
+  <div style="border-radius: 10px; border: 1px solid #ccc; padding: 10px;margin: 10px;">
+    <div id="results"></div>
+    <div id="json_tree" style="display: none;"></div>
+    <div id="json_results" style="display: none;"></div>
+    <div id="csv_results" style="display: none;"></div>
+  </div>
+</body>
+</html>
