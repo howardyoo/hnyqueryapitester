@@ -1,6 +1,8 @@
 # hnyqueryapitester
 Honeycomb Query API Tester for quick and easy testing of Honeycomb's query API
 
+![hnyqueryapitester](public/images/hnyqueryapitester.png)
+
 ## How to run
 
 ```
